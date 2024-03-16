@@ -5,6 +5,7 @@ import android.content.ContentValues
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
 import android.provider.MediaStore
 import android.util.Log
 import android.widget.Toast
@@ -27,14 +28,14 @@ typealias LumaListener = (luma: Double) -> Unit
 
 class MainActivity : AppCompatActivity() {
     private lateinit var viewBinding: ActivityMainBinding
-
     private var imageCapture: ImageCapture? = null
-
     private var videoCapture: VideoCapture<Recorder>? = null
     private var recording: Recording? = null
-
     private lateinit var cameraExecutor: ExecutorService
-
+    private var isRecording = false
+    private var startTime: Long = 0
+    private var timerHandler: Handler = Handler()
+    private lateinit var timerRunnable: Runnable
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         viewBinding = ActivityMainBinding.inflate(layoutInflater)
@@ -47,65 +48,17 @@ class MainActivity : AppCompatActivity() {
             requestPermissions()
         }
 
-        // Set up the listeners for take photo and video capture buttons
-        viewBinding.imageCaptureButton.setOnClickListener { takePhoto() }
-        viewBinding.videoCaptureButton.setOnClickListener { captureVideo() }
+        // Set up the listeners for video capture buttons
+        viewBinding.videoCaptureButton.setOnClickListener { toggleRecording() }
 
         cameraExecutor = Executors.newSingleThreadExecutor()
     }
 
-    private fun takePhoto() {
-        // Get a stable reference of the modifiable image capture use case
-        val imageCapture = imageCapture ?: return
-
-        // Create time stamped name and MediaStore entry.
-        val name = SimpleDateFormat(FILENAME_FORMAT, Locale.US).format(System.currentTimeMillis())
-        val contentValues = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, name)
-            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-            if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) {
-                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/CameraX-Image")
-            }
-        }
-
-        // Create output options object which contains file + metadata
-        val outputOptions = ImageCapture.OutputFileOptions.Builder(
-            contentResolver, MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues
-        ).build()
-
-        // Set up image capture listener, which is triggered after photo has
-        // been taken
-        imageCapture.takePicture(outputOptions,
-            ContextCompat.getMainExecutor(this),
-            object : ImageCapture.OnImageSavedCallback {
-                override fun onError(exc: ImageCaptureException) {
-                    Log.e(TAG, "Photo capture failed: ${exc.message}", exc)
-                }
-
-                override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                    val msg = "Photo capture succeeded: ${output.savedUri}"
-                    Toast.makeText(baseContext, msg, Toast.LENGTH_SHORT).show()
-                    Log.d(TAG, msg)
-                }
-            })
-    }
-
-
     // Implements VideoCapture use case, including start and stop capturing.
-    private fun captureVideo() {
+    private fun startRecording() {
         val videoCapture = this.videoCapture ?: return
+        isRecording = true
 
-        viewBinding.videoCaptureButton.isEnabled = false
-
-        val curRecording = recording
-        if (curRecording != null) {
-            // Stop the current recording session.
-            curRecording.stop()
-            recording = null
-            return
-        }
-
-        // create and start a new recording session
         val name = SimpleDateFormat(FILENAME_FORMAT, Locale.US).format(System.currentTimeMillis())
         val contentValues = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, name)
@@ -118,6 +71,7 @@ class MainActivity : AppCompatActivity() {
         val mediaStoreOutputOptions = MediaStoreOutputOptions.Builder(
             contentResolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI
         ).setContentValues(contentValues).build()
+
         recording = videoCapture.output.prepareRecording(this, mediaStoreOutputOptions).apply {
             if (PermissionChecker.checkSelfPermission(
                     this@MainActivity, Manifest.permission.RECORD_AUDIO
@@ -128,10 +82,10 @@ class MainActivity : AppCompatActivity() {
         }.start(ContextCompat.getMainExecutor(this)) { recordEvent ->
             when (recordEvent) {
                 is VideoRecordEvent.Start -> {
-                    viewBinding.videoCaptureButton.apply {
-                        text = getString(R.string.stop_capture)
-                        isEnabled = true
-                    }
+                    // Start timer
+                    startTime = System.currentTimeMillis()
+                    startTimer()
+                    updateUIForRecording(true)
                 }
                 is VideoRecordEvent.Finalize -> {
                     if (!recordEvent.hasError()) {
@@ -144,19 +98,17 @@ class MainActivity : AppCompatActivity() {
                         recording = null
                         Log.e(
                             TAG,
-                            "Video capture succeeded: " + "${recordEvent.outputResults.outputUri}"
+                            "Video capture failed: ${recordEvent.error.toString()}",
+//                            recordEvent.error.toString()
                         )
                     }
-                    viewBinding.videoCaptureButton.apply {
-                        text = getString(R.string.start_capture)
-                        isEnabled = true
-                    }
+                    // Stop timer
+                    stopTimer()
+                    updateUIForRecording(false)
                 }
-
             }
         }
     }
-
 
     private fun startCamera() {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
@@ -171,28 +123,19 @@ class MainActivity : AppCompatActivity() {
                 .also {
                     it.setSurfaceProvider(viewBinding.viewFinder.surfaceProvider)
                 }
+
+            // Image capture use case
+            imageCapture = ImageCapture.Builder().build()
+
+            // Video capture use case
             val recorder = Recorder.Builder()
                 .setQualitySelector(QualitySelector.from(Quality.HIGHEST,
                     FallbackStrategy.higherQualityOrLowerThan(Quality.SD)))
                 .build()
             videoCapture = VideoCapture.withOutput(recorder)
 
-            imageCapture = ImageCapture.Builder().build()
-
-            /*
-            val imageAnalyzer = ImageAnalysis.Builder().build()
-                .also {
-                    setAnalyzer(
-                        cameraExecutor,
-                        LuminosityAnalyzer { luma ->
-                            Log.d(TAG, "Average luminosity: $luma")
-                        }
-                    )
-                }
-            */
-
             // Select back camera as a default
-            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+            val cameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA
 
             try {
                 // Unbind use cases before rebinding
@@ -200,7 +143,8 @@ class MainActivity : AppCompatActivity() {
 
                 // Bind use cases to camera
                 cameraProvider.bindToLifecycle(
-                    this, cameraSelector, preview, imageCapture, videoCapture)
+                    this, cameraSelector, preview, imageCapture, videoCapture
+                )
 
             } catch(exc: Exception) {
                 Log.e(TAG, "Use case binding failed", exc)
@@ -208,8 +152,6 @@ class MainActivity : AppCompatActivity() {
 
         }, ContextCompat.getMainExecutor(this))
     }
-
-
 
     private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all {
         ContextCompat.checkSelfPermission(
@@ -255,26 +197,55 @@ class MainActivity : AppCompatActivity() {
         activityResultLauncher.launch(REQUIRED_PERMISSIONS)
     }
 
-    private class LuminosityAnalyzer(private val listener: LumaListener) : ImageAnalysis.Analyzer {
-
-        private fun ByteBuffer.toByteArray(): ByteArray {
-            rewind()    // Rewind the buffer to zero
-            val data = ByteArray(remaining())
-            get(data)   // Copy the buffer into a byte array
-            return data // Return the byte array
-        }
-
-        override fun analyze(image: ImageProxy) {
-
-            val buffer = image.planes[0].buffer
-            val data = buffer.toByteArray()
-            val pixels = data.map { it.toInt() and 0xFF }
-            val luma = pixels.average()
-
-            listener(luma)
-
-            image.close()
+    private fun toggleRecording() {
+        if (isRecording) {
+            // Stop recording
+            stopRecording()
+        } else {
+            // Start recording
+            startRecording()
         }
     }
 
+    private fun stopRecording() {
+        recording?.stop()
+        recording = null
+        isRecording = false
+    }
+
+    private fun startTimer() {
+        timerRunnable = object : Runnable {
+            override fun run() {
+                val millis = System.currentTimeMillis() - startTime
+                val seconds = (millis / 1000).toInt() % 60
+                val minutes = (millis / (1000 * 60)).toInt() % 60
+                val timeStr = String.format("%02d:%02d", minutes, seconds)
+                viewBinding.timerTextView.text = timeStr
+
+                if (millis < 30000) { // 30 seconds
+                    timerHandler.postDelayed(this, 500) // Update every 500 milliseconds
+                } else {
+                    stopRecording()
+                    Toast.makeText(
+                        baseContext,
+                        "Maximum recording time reached (30 seconds)",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        }
+        timerHandler.post(timerRunnable)
+    }
+
+    private fun stopTimer() {
+        timerHandler.removeCallbacks(timerRunnable)
+    }
+
+    private fun updateUIForRecording(isRecording: Boolean) {
+        if (isRecording) {
+            viewBinding.videoCaptureButton.text = getString(R.string.stop_capture)
+        } else {
+            viewBinding.videoCaptureButton.text = getString(R.string.start_capture)
+        }
+    }
 }
