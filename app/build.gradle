@@ -1,16 +1,19 @@
 plugins {
     id 'com.android.application'
     id 'org.jetbrains.kotlin.android'
+    id 'kotlin-kapt'
+    id 'kotlin-parcelize'
+
 }
 
 android {
     namespace 'com.npci.selfivideoprocessingapp'
-    compileSdk 33
+    compileSdk 34
 
     defaultConfig {
         applicationId "com.npci.selfivideoprocessingapp"
         minSdk 24
-        targetSdk 33
+        targetSdk 34
         versionCode 1
         versionName "1.0"
 
@@ -30,6 +33,15 @@ android {
     kotlinOptions {
         jvmTarget = '1.8'
     }
+
+    dataBinding {
+        enabled = true
+    }
+
+    buildFeatures {
+        viewBinding true
+    }
+
 }
 
 dependencies {
@@ -41,4 +53,49 @@ dependencies {
     testImplementation 'junit:junit:4.13.2'
     androidTestImplementation 'androidx.test.ext:junit:1.1.5'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
+
+    // ROOM
+    def room_version = "2.4.3"
+    implementation "androidx.room:room-runtime:$room_version"
+
+    // To use Kotlin annotation processing tool (kapt)
+    kapt("androidx.room:room-compiler:$room_version")
+
+
+    // Coroutines
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.6.1")
+    implementation "androidx.room:room-ktx:$room_version"
+
+
+    // Navigation
+    def nav_version = "2.5.3"
+    implementation("androidx.navigation:navigation-fragment-ktx:$nav_version")
+    implementation("androidx.navigation:navigation-ui-ktx:$nav_version")
+
+
+    // Life Cycle Arch
+    def lifecycle_version = "2.5.1"
+    // ViewModel
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:$lifecycle_version")
+    // LiveData
+    implementation("androidx.lifecycle:lifecycle-livedata-ktx:$lifecycle_version")
+    // Annotation processor
+    kapt("androidx.lifecycle:lifecycle-compiler:$lifecycle_version")
+
+
+    // CameraX core library using the camera2 implementation
+    def camerax_version = "1.4.0-alpha04"
+    // The following line is optional, as the core library is included indirectly by camera-camera2
+    implementation("androidx.camera:camera-core:${camerax_version}")
+    implementation("androidx.camera:camera-camera2:${camerax_version}")
+    // If you want to additionally use the CameraX Lifecycle library
+    implementation("androidx.camera:camera-lifecycle:${camerax_version}")
+    // If you want to additionally use the CameraX VideoCapture library
+    implementation("androidx.camera:camera-video:${camerax_version}")
+    // If you want to additionally use the CameraX View class
+    implementation("androidx.camera:camera-view:${camerax_version}")
+    // If you want to additionally add CameraX ML Kit Vision Integration
+    implementation("androidx.camera:camera-mlkit-vision:${camerax_version}")
+    // If you want to additionally use the CameraX Extensions library
+    implementation("androidx.camera:camera-extensions:${camerax_version}")
 }
