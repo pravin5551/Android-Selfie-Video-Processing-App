@@ -3,6 +3,8 @@ package com.npci.selfivideoprocessingapp
 import android.Manifest
 import android.content.ContentValues
 import android.content.pm.PackageManager
+import android.media.MediaCodec
+import android.media.MediaExtractor
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -17,7 +19,6 @@ import androidx.camera.video.*
 import androidx.core.content.ContextCompat
 import androidx.core.content.PermissionChecker
 import com.npci.selfivideoprocessingapp.databinding.ActivityMainBinding
-import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.ExecutorService
@@ -36,6 +37,9 @@ class MainActivity : AppCompatActivity() {
     private var startTime: Long = 0
     private var timerHandler: Handler = Handler()
     private lateinit var timerRunnable: Runnable
+
+    private lateinit var mediaCodec: MediaCodec
+    private lateinit var mediaExtractor: MediaExtractor
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         viewBinding = ActivityMainBinding.inflate(layoutInflater)
